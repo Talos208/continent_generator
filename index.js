@@ -7,9 +7,9 @@ const width = 1600;
 const height = 800;
 const border = 20;
 
-const crusts = 200;         // クラスト（地形タイル）の数
+const crusts = 2000;         // クラスト（地形タイル）の数
 const ratio = .35;           // 陸地の割合
-const continent_number = 17; // 大陸塊の数。3〜。多くても意外と破綻しない
+const continent_number = 3; // 大陸塊の数。3〜。多くても意外と破綻しない
 const smoothness = .5;      // 地形の滑らかさ。.25〜1.5ぐらい
 
 const total = width * height;
@@ -71,19 +71,29 @@ class Crust {
 
 let data = [];
 // 代表点の周りに肉付けして、陸のクラストを作る
-for (let i = 0; i < (crusts * ratio / continent_number); i++) {
-    continents.forEach(function (c, ix) {
+let ts = continents.reduce(function (a, v) {
+    return a + v.size
+}, 0);
+for (let i = 0; i < (crusts * ratio); i++) {
+    let r = Math.random() * ts;
+
+    for (const c of continents) {
+        r -= c.size;
+        if (r > 0) {
+            continue
+        }
         let s = c.size / 3
         while (true) {
             let x = d_rand(s) + c.x;
             let y = d_rand(s) + c.y;
             let p = [x, y];
             if (d3.polygonContains(c.area, p)) {
-                data.push(new Crust(x, y,  Math.pow(Math.random(), 1.5) * .5 + .5));
+                data.push(new Crust(x, y,  Math.random() * .5 + .5));
                 break
             }
         }
-    });
+        break
+    }
 }
 
 // 海になるクラストを作る
@@ -181,32 +191,15 @@ let svg = d3.select("body").append("svg")
 
 // 標高から色に変換
 function alt2col(depth) {
-    if (depth < -.67) {
-        return  "#028";
-    } else if (depth < -.33) {
-        return "#083480";
-    } else if (depth < 0) {
-        return "#148";
-    } else if (depth < .1) {
-        return "#083";
-    } else if (depth < .2) {
-        return "#393";
-    } else if (depth < .3) {
-        return "#5a4";
-    } else if (depth < .4) {
-        return "#8c5";
-    } else if (depth < .5) {
-        return "#be7";
-    } else if (depth < .6) {
-        return "#ab5";
-    } else if (depth < .7) {
-        return "#993";
-    } else if (depth < .8) {
-        return "#872";
-    } else if (depth < .9) {
-        return "#862";
+    if (depth < 0) {
+        let s = d3.interpolateLab("#028", "#148")
+        return s(depth + 1.0)
+    } else if (depth < 0.5) {
+        let g = d3.interpolateLab("#083", "#be7")
+        return g(depth * 2)
     }
-    return "#752";
+    let g = d3.interpolateLab("#be7", "#752")
+    return g((depth - .5) * 2)
 }
 
 poly.forEach(function (e) {
