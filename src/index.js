@@ -3,6 +3,11 @@
 //
 
 // パラメータ
+import * as d3_voronoi from "d3-voronoi"
+import * as d3_polygon from "d3-polygon"
+import * as d3_select from "d3-selection"
+import * as d3_interpolate from "d3-interpolate"
+
 const width = 1600;
 const height = 800;
 const border = 20;
@@ -15,7 +20,7 @@ const smoothness = .6;      // 地形の滑らかさ。.25〜1.5ぐらい
 const total = width * height;
 const slen = Math.sqrt(crusts); // height / border;
 
-let voronoi = d3.voronoi()
+let voronoi = d3_voronoi.voronoi()
     .size([width,height])
     .x(function (e) {
         return e.x
@@ -52,10 +57,10 @@ for (let i = 0; i < continent_number; i++) {
 
 // ボロノイ分割で各大陸のエリアを求める
 voronoi(continents).polygons().forEach(function (e, ix) {
-    let c = d3.polygonCentroid(e);
+    let c = d3_polygon.polygonCentroid(e);
     continents[ix].x = c[0]
     continents[ix].y = c[1]
-    continents[ix].size = Math.sqrt(d3.polygonArea(e))
+    continents[ix].size = Math.sqrt(d3_polygon.polygonArea(e))
     continents[ix].area = e
 });
 
@@ -97,7 +102,7 @@ for (let i = 0; i < (crusts * ratio); i++) {
             let x = d_rand(s * 1.6) + c.x;
             let y = d_rand(s * .8) + c.y;
             let p = [x, y];
-            if (d3.polygonContains(c.area, p)) {
+            if (d3_polygon.polygonContains(c.area, p)) {
                 data.push(new Crust(x, y,  Math.random() * .5 + .5));
                 break
             }
@@ -156,7 +161,7 @@ function adjust_ratio() {
         if (finished) {
             return
         }
-        cur += Math.abs(d3.polygonArea(e));
+        cur += Math.abs(d3_polygon.polygonArea(e));
         if (cur >= total * ratio) {
             let base = e.data.altitude
 
@@ -173,7 +178,7 @@ adjust_ratio()
 
 // 海岸線を列挙する
 function enum_shore(proc) {
-    vorn = voronoi(data)
+    let vorn = voronoi(data)
     vorn.links().forEach(function (e) {
         let tgt = null
         let sea = null
@@ -190,8 +195,8 @@ function enum_shore(proc) {
 
         let tc = vorn.find(tgt.x, tgt.y)
         let sc = vorn.find(sea.x, sea.y)
-        for (it of vorn.cells[tc.index].halfedges) {
-            for (is of vorn.cells[sc.index].halfedges) {
+        for (let it of vorn.cells[tc.index].halfedges) {
+            for (let is of vorn.cells[sc.index].halfedges) {
                 if (it == is) {
                     proc(vorn.edges[it], tgt, sea)
                     return
@@ -218,7 +223,7 @@ let adjusting = [get_shore()]
 // 標高差がありすぎる点は分割
 for (let i = 0;i < 4 ;i++) {
     let splitted = false
-    vorn = voronoi(data)
+    let vorn = voronoi(data)
     vorn.links().forEach(function (e) {
         if (e.source.altitude < 0 && e.target.altitude < 0) {
             // 双方海。処理しない
@@ -276,40 +281,36 @@ for (let i = 0;i < 10 ;i++) {
 }
 
 // 表示
-let svg = d3.select("body").append("svg")
+let svg = d3_select.select("body").append("svg")
     .attr("width", width)
     .attr("height", height);
 
 // 標高から色に変換
 function alt2col_dense(depth) {
     if (depth < 0) {
-        let s = d3.interpolateLab("#028", "#148")
+        let s = d3_interpolate.interpolateLab("#028", "#148")
         return s(depth + 1.0)
     } else if (depth < 0.5) {
-        let g = d3.interpolateLab("#083", "#be7")
+        let g = d3_interpolate.interpolateLab("#083", "#be7")
         return g(depth * 2)
     }
-    let g = d3.interpolateLab("#be7", "#752")
+    let g = d3_interpolate.interpolateLab("#be7", "#752")
     return g((depth - .5) * 2)
 }
 
 function alt2col_light(depth) {
     if (depth < 0) {
-        let s = d3.interpolateLab("lightblue", "azure")
+        let s = d3_interpolate.interpolateLab("lightblue", "azure")
         return s(depth + 1.0)
     } else if (depth < 0.5) {
-        let g = d3.interpolateLab("white", "lightgray")
-        // let g = d3.interpolateLab("honeydew", "#fafac0")
+        let g = d3_interpolate.interpolateLab("white", "lightgray")
         return g(depth * 2)
-    // } else if (depth < 0.8) {
-    //     let g = d3.interpolateLab("#fafac0", "darkkhaki")
-    //     return g((depth-.5) / .3)
     }
-    let g = d3.interpolateLab("lightgray", "gray")
-    // let g = d3.interpolateLab("#fafac0", "darkkhaki")
+    let g = d3_interpolate.interpolateLab("lightgray", "gray")
     return g((depth - .5)  / .5)
 }
 
+let vorn = voronoi(data)
 vorn.polygons().forEach(function (e) {
     let p = svg.append("polygon")
         .attr("points", e)
