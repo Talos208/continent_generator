@@ -28,6 +28,9 @@ let voronoi = d3_voronoi.voronoi()
         return e.y
     });
 
+let svg = d3_select.select("body").append("svg")
+    .attr("width", width)
+    .attr("height", height);
 
 function d_rand(size) {
     let v = 0.0
@@ -47,24 +50,6 @@ class Continent {
     }
 }
 
-// 陸塊の代表点を作る
-let continents = []
-for (let i = 0; i < continent_number; i++) {
-    let x = Math.random() * (width - border * 4) + border * 2 ;
-    let y = Math.random() * height;
-    continents.push(new Continent(x, y));
-}
-
-// ボロノイ分割で各大陸のエリアを求める
-voronoi(continents).polygons().forEach(function (e, ix) {
-    let c = d3_polygon.polygonCentroid(e);
-    continents[ix].x = c[0]
-    continents[ix].y = c[1]
-    continents[ix].size = Math.sqrt(d3_polygon.polygonArea(e))
-    continents[ix].area = e
-});
-
-
 // クラストを表す構造体
 class Crust {
     constructor(x, y, a = 1) {
@@ -83,6 +68,162 @@ class Crust {
         this.altitude = a
     }
 }
+
+
+// 標高計算
+function ease_altitude() {
+    // ボロノイ分割して隣接点を求める
+    let links = voronoi(data).links();
+    // 隣接点同士を少しずつ均す
+    for (let i = 0; i < Math.sqrt(crusts) * ratio * smoothness; i++) {
+        links.forEach(function (e, ix) {
+            // 単純な平均操作より、この式のほうがいい感じになる
+            let ds = e.source.altitude / 12;
+            let dt = e.target.altitude / 12;
+
+            e.source.altitude += dt - ds
+            e.target.altitude += ds - dt
+        })
+    }
+}
+
+// 陸/海比率の調整
+// 標高順にソート
+function adjust_ratio() {
+    let p2 = Array.from(data)
+    p2.sort(function (a, b) {
+        return b.altitude - a.altitude
+    });
+    // 面積を求めるのでボロノイ分割で領域を求める
+    let vorn = voronoi(p2);
+
+    // 全体にしめる面積比が陸地の割合になる点を探す
+    let cur = 0.0;
+    let finished = false
+    vorn.polygons().forEach(function (e, ix) {
+        if (finished) {
+            return
+        }
+        cur += Math.abs(d3_polygon.polygonArea(e));
+        if (cur >= total * ratio) {
+            let base = e.data.altitude
+
+            // その地点の標高が0になるよう全体を調整
+            data.forEach(function (e) {
+                e.altitude -= base
+            })
+            finished = true
+        }
+    })
+}
+
+// 海岸線を列挙する
+function enum_shore(proc) {
+    let vorn = voronoi(data)
+    vorn.links().forEach(function (e) {
+        let tgt = null
+        let sea = null
+        if (e.source.altitude < 0 && e.target.altitude >= 0) {
+            tgt = e.target
+            sea = e.source
+        } else if (e.source.altitude >= 0 && e.target.altitude < 0) {
+            tgt = e.source
+            sea = e.target
+        }
+        if (tgt == null) {
+            return
+        }
+
+        let tc = vorn.find(tgt.x, tgt.y)
+        let sc = vorn.find(sea.x, sea.y)
+        for (let it of vorn.cells[tc.index].halfedges) {
+            for (let is of vorn.cells[sc.index].halfedges) {
+                if (it == is) {
+                    proc(vorn.edges[it], tgt, sea)
+                    return
+                }
+            }
+        }
+    })
+}
+
+// 海岸線を取得
+function get_shore() {
+    let result = []
+
+    enum_shore(function (edge, tgt, sea) {
+        result.push(edge)
+    })
+
+    return result
+}
+
+function alt2col_dense(depth) {
+    if (depth < 0) {
+        let s = d3_interpolate.interpolateLab("#028", "#148")
+        return s(depth + 1.0)
+    } else if (depth < 0.5) {
+        let g = d3_interpolate.interpolateLab("#083", "#be7")
+        return g(depth * 2)
+    }
+    let g = d3_interpolate.interpolateLab("#be7", "#752")
+    return g((depth - .5) * 2)
+}
+
+function alt2col_light(depth) {
+    if (depth < 0) {
+        let s = d3_interpolate.interpolateLab("lightblue", "azure")
+        return s(depth + 1.0)
+    } else if (depth < 0.5) {
+        let g = d3_interpolate.interpolateLab("white", "lightgray")
+        return g(depth * 2)
+    }
+    let g = d3_interpolate.interpolateLab("lightgray", "gray")
+    return g((depth - .5)  / .5)
+}
+
+function draw_map(svg, poly, outline=null) {
+    poly.forEach(function (e) {
+        let p = svg.append("polygon")
+            .attr("points", e)
+            .attr("stroke-width", 0)
+
+        let depth = e.data.altitude;
+        // 標高から色に変換
+        // let col = alt2col_dense(depth)
+        let col = alt2col_light(depth)
+        p.attr("fill", col)
+        // .attr("stroke", col)
+    });
+    if (outline) {
+        outline.forEach(function (e) {
+            let l = svg.append("line")
+                .attr("x1", e[0][0])
+                .attr("y1", e[0][1])
+                .attr("x2", e[1][0])
+                .attr("y2", e[1][1])
+                .attr("stroke", "gray")
+        })
+    }
+}
+
+
+// 陸塊の代表点を作る
+let continents = []
+for (let i = 0; i < continent_number; i++) {
+    let x = Math.random() * (width - border * 4) + border * 2 ;
+    let y = Math.random() * height;
+    continents.push(new Continent(x, y));
+}
+
+// ボロノイ分割で各大陸のエリアを求める
+voronoi(continents).polygons().forEach(function (e, ix) {
+    let c = d3_polygon.polygonCentroid(e);
+    continents[ix].x = c[0]
+    continents[ix].y = c[1]
+    continents[ix].size = Math.sqrt(d3_polygon.polygonArea(e))
+    continents[ix].area = e
+});
 
 let data = [];
 // 代表点の周りに肉付けして、陸のクラストを作る
@@ -126,96 +267,9 @@ for (let i = 0; i < slen; i++) {
 }
 
 
-// 標高計算
-function ease_altitude() {
-    // ボロノイ分割して隣接点を求める
-    let links = voronoi(data).links();
-    // 隣接点同士を少しずつ均す
-    for (let i = 0; i < Math.sqrt(crusts) * ratio * smoothness; i++) {
-        links.forEach(function (e, ix) {
-            // 単純な平均操作より、この式のほうがいい感じになる
-            let ds = e.source.altitude / 12;
-            let dt = e.target.altitude / 12;
-
-            e.source.altitude += dt - ds
-            e.target.altitude += ds - dt
-        })
-    }
-}
 ease_altitude()
 
-// 陸/海比率の調整
-// 標高順にソート
-function adjust_ratio() {
-    let p2 = Array.from(data)
-    p2.sort(function (a, b) {
-        return b.altitude - a.altitude
-    });
-    // 面積を求めるのでボロノイ分割で領域を求める
-    let vorn = voronoi(p2);
-
-    // 全体にしめる面積比が陸地の割合になる点を探す
-    let cur = 0.0;
-    let finished = false
-    vorn.polygons().forEach(function (e, ix) {
-        if (finished) {
-            return
-        }
-        cur += Math.abs(d3_polygon.polygonArea(e));
-        if (cur >= total * ratio) {
-            let base = e.data.altitude
-
-            // その地点の標高が0になるよう全体を調整
-            data.forEach(function (e) {
-                e.altitude -= base
-            })
-            finished = true
-        }
-    })
-}
-
 adjust_ratio()
-
-// 海岸線を列挙する
-function enum_shore(proc) {
-    let vorn = voronoi(data)
-    vorn.links().forEach(function (e) {
-        let tgt = null
-        let sea = null
-        if (e.source.altitude < 0 && e.target.altitude >= 0) {
-            tgt = e.target
-            sea = e.source
-        } else if (e.source.altitude >= 0 && e.target.altitude < 0) {
-            tgt = e.source
-            sea = e.target
-        }
-        if (tgt == null) {
-            return
-        }
-
-        let tc = vorn.find(tgt.x, tgt.y)
-        let sc = vorn.find(sea.x, sea.y)
-        for (let it of vorn.cells[tc.index].halfedges) {
-            for (let is of vorn.cells[sc.index].halfedges) {
-                if (it == is) {
-                    proc(vorn.edges[it], tgt, sea)
-                    return
-                }
-            }
-        }
-    })
-}
-
-// 海岸線を取得
-function get_shore() {
-    let result = []
-
-    enum_shore(function (edge, tgt, sea) {
-        result.push(edge)
-    })
-
-    return result
-}
 
 // 調整前の海岸線を保存しておく
 let adjusting = [get_shore()]
@@ -246,9 +300,8 @@ for (let i = 0;i < 4 ;i++) {
 }
 adjusting.push(get_shore())
 
-
 //海岸線を細かくする
-for (let i = 0;i < 10 ;i++) {
+for (let i = 0;i < 8 ;i++) {
     let splitted = false
     enum_shore(function (edge, tgt, sea) {
         // 海岸線の長さを取得
@@ -274,55 +327,21 @@ for (let i = 0;i < 10 ;i++) {
         splitted = true;
     })
     adjust_ratio()
-    adjusting.push(get_shore())
+    let shore = get_shore();
+    adjusting.push(shore)
+    // draw_map(svg, voronoi(data).polygons(), shore)
     if (!splitted) {
         break
     }
 }
 
 // 表示
-let svg = d3_select.select("body").append("svg")
-    .attr("width", width)
-    .attr("height", height);
-
-// 標高から色に変換
-function alt2col_dense(depth) {
-    if (depth < 0) {
-        let s = d3_interpolate.interpolateLab("#028", "#148")
-        return s(depth + 1.0)
-    } else if (depth < 0.5) {
-        let g = d3_interpolate.interpolateLab("#083", "#be7")
-        return g(depth * 2)
-    }
-    let g = d3_interpolate.interpolateLab("#be7", "#752")
-    return g((depth - .5) * 2)
-}
-
-function alt2col_light(depth) {
-    if (depth < 0) {
-        let s = d3_interpolate.interpolateLab("lightblue", "azure")
-        return s(depth + 1.0)
-    } else if (depth < 0.5) {
-        let g = d3_interpolate.interpolateLab("white", "lightgray")
-        return g(depth * 2)
-    }
-    let g = d3_interpolate.interpolateLab("lightgray", "gray")
-    return g((depth - .5)  / .5)
-}
-
 let vorn = voronoi(data)
-vorn.polygons().forEach(function (e) {
-    let p = svg.append("polygon")
-        .attr("points", e)
-        .attr("stroke-width", 0)
+let poly = vorn.polygons()
+let outline = adjusting.pop()
+draw_map(svg, poly, outline)
 
-    let depth = e.data.altitude;
-    // let col = alt2col_dense(depth)
-    let col = alt2col_light(depth)
-    p.attr("fill", col)
-        // .attr("stroke", col)
-});
-/*
+// 海岸線の変更履歴を表示する
 let s = d3.interpolateHslLong("red", "blue")
 adjusting.forEach(function (adj, ix) {
     let col = s(ix / (adjusting.length - 1))
@@ -336,16 +355,4 @@ adjusting.forEach(function (adj, ix) {
             .attr("stroke", col)
             .attr("stroke-width", .5)
     })
-})
-*/
-adjusting.pop().forEach(function (e) {
-// let links = p.links(data);
-// links.forEach(function (e) {
-    let l = svg.append("line")
-        .attr("x1", e[0][0])
-        .attr("y1", e[0][1])
-        .attr("x2", e[1][0])
-        .attr("y2", e[1][1])
-        .attr("stroke", "gray")
-        // .attr("stroke-width", 1)
 })
